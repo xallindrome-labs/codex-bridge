@@ -20,7 +20,7 @@ Restart Claude Code, then ask it something like *"Get a plan from Codex for addi
 
 Other MCP clients: run `npx -y codex-bridge` as a stdio server.
 
-> **Platform note:** developed and tested on Windows 11. The macOS and Linux code paths exist but are untested. Reports and fixes are welcome.
+> **Platform note:** developed and tested on Windows 11, where real Codex jobs have been run. CI checks on Linux, macOS and Windows (Node 20 and 22) that the server starts, speaks MCP and installs from the npm tarball, but it has no Codex CLI. So running real Codex jobs on macOS and Linux is untested. Reports and fixes are welcome.
 
 | Tool | What it does | Sandbox | Default model / effort |
 |---|---|---|---|
