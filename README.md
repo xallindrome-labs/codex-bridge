@@ -1,6 +1,6 @@
 # codex-bridge
 
-**Let Claude Code ask Codex for a plan, a second opinion or an image, and keep working while it thinks.** A dependency-free MCP server; every call is a durable background job that survives Claude closing or crashing.
+**Codex jobs for Claude Code that survive crashes, closed windows and reboots, with Codex image generation built in.** A dependency-free MCP server built Windows-first: every call is a job saved on disk, so you can close Claude, lose power, or kill a process, and pick the work up again with `codex_resume`.
 
 Roles: **Claude Code implements. Codex plans and builds images.**
 
@@ -37,6 +37,21 @@ Other MCP clients: run `npx -y codex-bridge` as a stdio server.
 - `session_id`: continues an earlier Codex thread, for example "make the icon darker".
 
 `codex_image` also takes `count`, the number of images wanted. Set it for batches: it enables `k/count` progress and resumes that ask for exactly the missing images.
+
+## How it compares
+
+OpenAI's [codex-plugin-cc](https://github.com/openai/codex-plugin-cc) is the official way to use Codex from Claude Code, and it's good at what it does: slash commands for review and rescue. codex-bridge is an MCP server instead, with a different focus: **jobs that don't get lost**, and **images**.
+
+Several open issues in the plugin's tracker are about jobs getting lost, and codex-bridge is designed to avoid each of them. These come from reading the designs, not from a head-to-head test:
+
+| Reported in codex-plugin-cc | How codex-bridge handles it |
+|---|---|
+| Background job shows "running" forever after its worker dies ([#704](https://github.com/openai/codex-plugin-cc/issues/704), [#699](https://github.com/openai/codex-plugin-cc/issues/699)) | Status is worked out from files on disk plus a heartbeat and a process check. A dead runner shows as `interrupted`, never "running", and `codex_resume` continues it. |
+| Windows `cancel` silently fails ([#708](https://github.com/openai/codex-plugin-cc/issues/708)) | Cancel writes a marker file; the runner that owns the Codex process sees it within about 2 seconds and stops the process tree by calling `taskkill.exe` directly, with no shell in between. |
+| Windows broker processes leak ([#718](https://github.com/openai/codex-plugin-cc/issues/718), [#782](https://github.com/openai/codex-plugin-cc/issues/782)) | There is no shared broker. Each attempt is one runner process that exits when Codex does. |
+| One session ending kills other sessions' jobs ([#671](https://github.com/openai/codex-plugin-cc/issues/671)) | Runners are started outside Claude's process tree (via WMI on Windows), so closing a session can't take them down. |
+
+What the plugin does that this doesn't: slash commands, and its review-gate and rescue workflows. And this one is newer, with far fewer users. If the plugin works for you, keep using it. If you've lost jobs, or want Codex to generate images that survive a crash, try this.
 
 ## Jobs survive restarts
 

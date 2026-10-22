@@ -6,7 +6,7 @@ Pull requests are welcome too, but this is a one-person project, so **PRs are re
 
 Notes:
 - There are no dependencies and I'd like to keep it that way.
-- Run `node smoke-test.mjs <scratch-dir> plan` before sending a PR. It needs a working, logged-in Codex CLI and uses a little of your Codex quota.
+- Run `npm test` before sending a PR (a protocol check that needs no Codex). If you touched job handling, also run `node smoke-test.mjs <scratch-dir> plan`: it needs a working, logged-in Codex CLI and uses a little of your Codex quota.
 - Developed and tested on Windows 11. Reports and fixes for macOS and Linux are especially useful.
 - By contributing you agree your contribution is licensed under the MIT license.
 

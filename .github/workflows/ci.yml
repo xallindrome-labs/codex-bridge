@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # No Codex CLI or login is available in CI, so this checks the server
+      # itself: it starts, speaks MCP, lists its tools and validates input.
+      - name: MCP handshake and tool list
+        shell: bash
+        run: node test/protocol.mjs
+
+      - name: Pack and run from the tarball
+        shell: bash
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          mkdir "$RUNNER_TEMP/clean" && cd "$RUNNER_TEMP/clean"
+          npx --yes --package "$RUNNER_TEMP"/codex-bridge-*.tgz codex-bridge --version
