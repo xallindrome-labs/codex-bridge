@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.xallindrome-labs/codex-bridge",
+  "title": "codex-bridge",
+  "description": "Lets Claude Code consult the Codex CLI for plans and images, as durable background jobs.",
+  "websiteUrl": "https://xallindrome.co",
+  "repository": {
+    "url": "https://github.com/xallindrome-labs/codex-bridge",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "codex-bridge",
+      "version": "0.1.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        { "name": "CODEX_BIN", "description": "Path to the Codex CLI binary. Auto-detected when unset.", "isRequired": false },
+        { "name": "CODEX_BRIDGE_HOME", "description": "Where job files are stored. Default: ~/.codex-bridge", "isRequired": false },
+        { "name": "CODEX_BRIDGE_IDLE_TIMEOUT_MS", "description": "Stop a run after this many ms with no Codex output. Default: 600000", "isRequired": false },
+        { "name": "CODEX_BRIDGE_PLAN_MODEL", "description": "Model for codex_plan. Default: your Codex config.", "isRequired": false },
+        { "name": "CODEX_BRIDGE_PLAN_EFFORT", "description": "Reasoning effort for codex_plan. Default: your Codex config.", "isRequired": false },
+        { "name": "CODEX_BRIDGE_IMAGE_MODEL", "description": "Model for codex_image. Default: gpt-6-luna", "isRequired": false },
+        { "name": "CODEX_BRIDGE_IMAGE_EFFORT", "description": "Reasoning effort for codex_image. Default: high", "isRequired": false }
+      ]
+    }
+  ]
+}

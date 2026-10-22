@@ -1,0 +1,33 @@
+{
+  "name": "codex-bridge",
+  "version": "0.1.0",
+  "description": "MCP server that lets Claude Code consult the Codex CLI for plans, second opinions and images, as durable background jobs.",
+  "keywords": ["mcp", "model-context-protocol", "claude-code", "codex", "openai-codex", "planning", "image-generation"],
+  "homepage": "https://github.com/xallindrome-labs/codex-bridge#readme",
+  "bugs": "https://github.com/xallindrome-labs/codex-bridge/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xallindrome-labs/codex-bridge.git"
+  },
+  "license": "MIT",
+  "author": "Andrew Wilson (https://xallindrome.co)",
+  "mcpName": "io.github.xallindrome-labs/codex-bridge",
+  "type": "module",
+  "bin": {
+    "codex-bridge": "server.mjs"
+  },
+  "files": [
+    "server.mjs",
+    "runner.mjs",
+    "lib.mjs",
+    "smoke-test.mjs",
+    "docs/demo.svg",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node smoke-test.mjs smoke-tmp plan"
+  }
+}

@@ -1,0 +1,4 @@
+node_modules/
+smoke-tmp/
+*.tgz
+SPEC.md
