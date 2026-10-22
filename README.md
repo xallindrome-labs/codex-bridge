@@ -13,12 +13,12 @@ Roles: **Claude Code implements. Codex plans and builds images.**
 You need [Node.js](https://nodejs.org) 20 or newer and the [Codex CLI](https://github.com/openai/codex) installed and logged in.
 
 ```bash
-claude mcp add codex-bridge -- npx -y codex-bridge
+claude mcp add codex-bridge -- npx -y @xallindrome-labs/codex-bridge
 ```
 
 Restart Claude Code, then ask it something like *"Get a plan from Codex for adding rate limiting, in the background, and keep going"*. Claude will call `codex_plan` with `background: true` and collect the answer later.
 
-Other MCP clients: run `npx -y codex-bridge` as a stdio server.
+Other MCP clients: run `npx -y @xallindrome-labs/codex-bridge` as a stdio server.
 
 > **Platform note:** developed and tested on Windows 11, where real Codex jobs have been run. CI checks on Linux, macOS and Windows (Node 20 and 22) that the server starts, speaks MCP and works when installed from the npm tarball, and on Linux and macOS that jobs run, finish and survive the server being killed, using a fake `codex`. CI has no real Codex CLI, so real Codex jobs on macOS and Linux are untested. Reports and fixes are welcome.
 
@@ -93,7 +93,7 @@ Every call runs read-only. New sessions pass `-s read-only` plus `-c sandbox_mod
 
 ```bash
 # for all your projects
-claude mcp add -s user codex-bridge -- npx -y codex-bridge
+claude mcp add -s user codex-bridge -- npx -y @xallindrome-labs/codex-bridge
 
 # or from a local checkout
 claude mcp add codex-bridge -- node /path/to/codex-bridge/server.mjs

@@ -55,7 +55,7 @@ if (process.argv.includes('--version') || process.argv.includes('-v')) {
 if (process.argv.includes('--help') || process.argv.includes('-h') || process.stdin.isTTY) {
   console.log(`codex-bridge ${PKG.version}: an MCP server (stdio) that lets Claude Code consult the Codex CLI.
 It is started by an MCP client, not run by hand. Register it with Claude Code:
-  claude mcp add codex-bridge -- npx -y codex-bridge
+  claude mcp add codex-bridge -- npx -y @xallindrome-labs/codex-bridge
 Docs: ${PKG.homepage}`);
   process.exit(0);
 }

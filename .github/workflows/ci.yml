@@ -42,11 +42,11 @@ jobs:
           npm pack --pack-destination "$RUNNER_TEMP"
           mkdir "$RUNNER_TEMP/clean" && cd "$RUNNER_TEMP/clean"
           npm init -y > /dev/null
-          npm install "$RUNNER_TEMP"/codex-bridge-*.tgz
+          npm install "$RUNNER_TEMP"/xallindrome-labs-codex-bridge-*.tgz
           for f in server.mjs runner.mjs lib.mjs LICENSE README.md; do
-            test -f "node_modules/codex-bridge/$f" || { echo "missing from package: $f"; exit 1; }
+            test -f "node_modules/@xallindrome-labs/codex-bridge/$f" || { echo "missing from package: $f"; exit 1; }
           done
           cd "$GITHUB_WORKSPACE"
-          export CODEX_BRIDGE_TEST_SERVER="$RUNNER_TEMP/clean/node_modules/codex-bridge/server.mjs"
+          export CODEX_BRIDGE_TEST_SERVER="$RUNNER_TEMP/clean/node_modules/@xallindrome-labs/codex-bridge/server.mjs"
           node test/protocol.mjs
           node test/jobs.mjs
