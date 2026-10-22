@@ -28,7 +28,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node test/protocol.mjs",
+    "test": "node test/protocol.mjs && node test/jobs.mjs",
     "smoke": "node smoke-test.mjs smoke-tmp plan"
   }
 }

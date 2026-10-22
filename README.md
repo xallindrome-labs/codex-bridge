@@ -20,7 +20,7 @@ Restart Claude Code, then ask it something like *"Get a plan from Codex for addi
 
 Other MCP clients: run `npx -y codex-bridge` as a stdio server.
 
-> **Platform note:** developed and tested on Windows 11, where real Codex jobs have been run. CI checks on Linux, macOS and Windows (Node 20 and 22) that the server starts, speaks MCP and installs from the npm tarball, but it has no Codex CLI. So running real Codex jobs on macOS and Linux is untested. Reports and fixes are welcome.
+> **Platform note:** developed and tested on Windows 11, where real Codex jobs have been run. CI checks on Linux, macOS and Windows (Node 20 and 22) that the server starts, speaks MCP and works when installed from the npm tarball, and on Linux and macOS that jobs run, finish and survive the server being killed, using a fake `codex`. CI has no real Codex CLI, so real Codex jobs on macOS and Linux are untested. Reports and fixes are welcome.
 
 | Tool | What it does | Sandbox | Default model / effort |
 |---|---|---|---|
@@ -81,7 +81,7 @@ Each attempt keeps its own `prompt.txt`, `events.jsonl` (the Codex event stream)
 
 Each attempt runs `codex exec --json` (or `codex exec resume <thread>`) with the prompt on stdin. No shell is involved.
 
-Every call runs read-only, set explicitly with `-s` plus `-c sandbox_mode=...`. Your Codex config defaults to `danger-full-access`, but that default never applies to bridge calls.
+Every call runs read-only. New sessions pass `-s read-only` plus `-c sandbox_mode="read-only"`; resumed sessions pass `-c sandbox_mode="read-only"` (`codex exec resume` takes no `-s`). Your Codex config may default to `danger-full-access`, but that default never applies to bridge calls. The `plan` smoke test checks that a write attempted from a resumed session fails.
 
 | File | Role |
 |---|---|
@@ -135,6 +135,10 @@ Each call has a fixed cost of about 4–5 seconds, and changing settings barely 
 - This uses Codex's own login and quota, with no separate API key. A job left running after Claude closes keeps using that quota until it finishes.
 - Bridge calls run headlessly, so they don't show up as conversations in the Codex Desktop sidebar.
 - Don't send secrets in prompts. Prompts go to OpenAI.
+
+## Issues and contributing
+
+Bug reports and ideas are welcome on the [issue tracker](https://github.com/xallindrome-labs/codex-bridge/issues). Pull requests are welcome too, but reviewed slowly; see [CONTRIBUTING.md](CONTRIBUTING.md). Please report security problems privately, as described in [SECURITY.md](SECURITY.md).
 
 ## License
 

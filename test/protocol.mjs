@@ -9,7 +9,8 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
-const server = fileURLToPath(new URL('../server.mjs', import.meta.url));
+// CODEX_BRIDGE_TEST_SERVER lets CI point the same test at the server inside the packed tarball.
+const server = process.env.CODEX_BRIDGE_TEST_SERVER ?? fileURLToPath(new URL('../server.mjs', import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bridge-test-'));
 

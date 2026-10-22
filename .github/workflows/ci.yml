@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   smoke:
     name: ${{ matrix.os }} / node ${{ matrix.node }}
@@ -20,15 +23,30 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      # No Codex CLI or login is available in CI, so this checks the server
-      # itself: it starts, speaks MCP, lists its tools and validates input.
-      - name: MCP handshake and tool list
+      # No Codex CLI or login is available in CI, so these test the server itself:
+      # the MCP handshake, tool list and input validation, then (on Linux and macOS)
+      # the job lifecycle against a fake `codex` executable.
+      - name: Protocol test
         shell: bash
         run: node test/protocol.mjs
 
-      - name: Pack and run from the tarball
+      - name: Job lifecycle test (fake codex; skipped on Windows)
+        shell: bash
+        run: node test/jobs.mjs
+
+      # Install the packed tarball into an empty folder and run the same tests against
+      # the installed copy, so a file missing from the package fails CI.
+      - name: Pack, install and test the installed package
         shell: bash
         run: |
           npm pack --pack-destination "$RUNNER_TEMP"
           mkdir "$RUNNER_TEMP/clean" && cd "$RUNNER_TEMP/clean"
-          npx --yes --package "$RUNNER_TEMP"/codex-bridge-*.tgz codex-bridge --version
+          npm init -y > /dev/null
+          npm install "$RUNNER_TEMP"/codex-bridge-*.tgz
+          for f in server.mjs runner.mjs lib.mjs LICENSE README.md; do
+            test -f "node_modules/codex-bridge/$f" || { echo "missing from package: $f"; exit 1; }
+          done
+          cd "$GITHUB_WORKSPACE"
+          export CODEX_BRIDGE_TEST_SERVER="$RUNNER_TEMP/clean/node_modules/codex-bridge/server.mjs"
+          node test/protocol.mjs
+          node test/jobs.mjs

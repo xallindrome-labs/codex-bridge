@@ -9,7 +9,7 @@ Please don't open a public issue for a vulnerability. This is a one-person proje
 
 ## What codex-bridge does that matters for security
 
-- It runs the Codex CLI on your machine, always with a **read-only sandbox** (`-s read-only` plus `-c sandbox_mode="read-only"`). Your Codex config's default sandbox mode never applies to bridge calls.
+- It runs the Codex CLI on your machine, always with a **read-only sandbox**: `-c sandbox_mode="read-only"` on every call, plus `-s read-only` when starting a new session. Your Codex config's default sandbox mode never applies to bridge calls.
 - It starts Codex without a shell: arguments are passed as an array and the prompt goes in over stdin.
 - Prompts and any `context` you pass are sent to OpenAI through the Codex CLI, under your own Codex login. **Don't put secrets in prompts.**
 - Job files (prompts, Codex event streams, results) are stored unencrypted under `~/.codex-bridge/jobs/` (override with `CODEX_BRIDGE_HOME`) and deleted after 14 days.
