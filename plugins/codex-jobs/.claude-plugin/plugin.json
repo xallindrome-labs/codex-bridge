@@ -1,0 +1,9 @@
+{
+  "name": "codex-jobs",
+  "version": "0.1.0",
+  "description": "A pane beside the chat that lists your codex-bridge jobs live: running, done, interrupted.",
+  "author": { "name": "Xallindrome", "url": "https://xallindrome.co" },
+  "homepage": "https://github.com/xallindrome-labs/codex-bridge#codex-jobs-pane",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

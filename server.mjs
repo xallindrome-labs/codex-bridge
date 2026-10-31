@@ -9,6 +9,7 @@
 //
 // Tools:
 //   codex_plan   - read-only planning / design review / second opinion
+//   codex_code   - OPT-IN: Codex implements a change, writing only inside CODEX_BRIDGE_WRITE_ROOT
 //   codex_image  - image generation; images are saved into output_dir
 //   codex_result - status/result of jobs (optionally waits); lists jobs
 //   codex_resume - continue an interrupted/failed job where it left off
@@ -20,6 +21,11 @@
 //   CODEX_BRIDGE_IDLE_TIMEOUT_MS   kill a run after this long with no Codex output (default 600000)
 //   CODEX_BRIDGE_PLAN_MODEL        plan model (default: Codex config default)
 //   CODEX_BRIDGE_PLAN_EFFORT       plan reasoning effort (default: Codex config default)
+//   CODEX_BRIDGE_WRITE_ROOT        enables codex_code: the ONE folder Codex may write in (unset = tool off)
+//   CODEX_BRIDGE_WRITE_ALLOW_TMP   1 = codex_code may also write to the system temp dirs. Default: asks Codex to
+//                                  block them. Tested: honoured on Linux/macOS builds only if Codex supports it;
+//                                  NOT enforced on Windows (temp stays writable there)
+//   CODEX_BRIDGE_CODE_MODEL / _EFFORT   codex_code model / reasoning effort (default: Codex config default)
 //   CODEX_BRIDGE_IMAGE_MODEL       image model (default gpt-6-luna)
 //   CODEX_BRIDGE_IMAGE_EFFORT      image reasoning effort (default high)
 
@@ -30,8 +36,8 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import {
-  EventTail, JOBS_DIR, attemptDir, buildCodexArgs, collectImages, isWin, jobDir, jobImages,
-  pidAlive, readJson, resolveCodexBin, writeJson,
+  BRIDGE_HOME, EventTail, JOBS_DIR, attemptDir, buildCodexArgs, collectImages, insideWriteRoot, isWin, jobDir, jobImages,
+  pidAlive, readJson, resolveCodexBin, resolveWriteRoot, writeJson,
 } from './lib.mjs';
 
 const PKG = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
@@ -41,21 +47,31 @@ const IDLE_TIMEOUT_MS = Number(process.env.CODEX_BRIDGE_IDLE_TIMEOUT_MS) || 10 *
 const DEFAULTS = {
   codex_plan: { model: process.env.CODEX_BRIDGE_PLAN_MODEL || '', effort: process.env.CODEX_BRIDGE_PLAN_EFFORT || '' },
   codex_image: { model: process.env.CODEX_BRIDGE_IMAGE_MODEL || 'gpt-6-luna', effort: process.env.CODEX_BRIDGE_IMAGE_EFFORT || 'high' },
+  codex_code: { model: process.env.CODEX_BRIDGE_CODE_MODEL || '', effort: process.env.CODEX_BRIDGE_CODE_EFFORT || '' },
 };
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 const MAX_WAIT_S = 240;
 const STALE_HEARTBEAT_MS = 10 * 60 * 1000;
 const PRUNE_AFTER_MS = 14 * 24 * 3600 * 1000;
 const CODEX_BIN = resolveCodexBin();
+const WRITE_ALLOW_TMP = process.env.CODEX_BRIDGE_WRITE_ALLOW_TMP === '1';
+let WRITE_ROOT = null; // set only when the user opts in to codex_code
+try { WRITE_ROOT = resolveWriteRoot(); } catch (err) { process.stderr.write(`codex-bridge: codex_code stays off: ${err.message}\n`); }
 
 if (process.argv.includes('--version') || process.argv.includes('-v')) {
   console.log(PKG.version);
+  process.exit(0);
+}
+// Where the bundled codex-jobs pane add-on lives, for `claude --plugin-dir "$(npx ... --pane-path)"`.
+if (process.argv.includes('--pane-path')) {
+  console.log(path.join(path.dirname(fileURLToPath(import.meta.url)), 'plugins', 'codex-jobs'));
   process.exit(0);
 }
 if (process.argv.includes('--help') || process.argv.includes('-h') || process.stdin.isTTY) {
   console.log(`codex-bridge ${PKG.version}: an MCP server (stdio) that lets Claude Code consult the Codex CLI.
 It is started by an MCP client, not run by hand. Register it with Claude Code:
   claude mcp add codex-bridge -- npx -y @xallindrome-labs/codex-bridge
+Flags: --version, --help, --pane-path (print the folder of the bundled codex-jobs pane add-on)
 Docs: ${PKG.homepage}`);
   process.exit(0);
 }
@@ -72,6 +88,18 @@ Rules:
 - Be concise; no preamble.
 
 Request from Claude Code:
+`;
+
+const CODE_PREAMBLE = cwd => `You are the BUILDER in a two-agent workflow. Claude Code is the reviewer and will check your work.
+Rules:
+- Work only inside ${cwd}. Your sandbox allows writes there and nowhere else; do not try to work around it.
+- Make the change that was asked for and nothing else: no unrelated refactors, renames or reformatting.
+- Do not commit, push, create branches or change git config. Leave your changes uncommitted in the working tree so Claude can review the diff.
+- Do not install global packages. The sandbox has no network access: if the task needs a dependency or the network, stop and say so instead of guessing.
+- Run the project's tests or linters if you can and report the exact result. If something cannot run in the sandbox, say what and why.
+- When finished, reply with: a short summary, the files you created, changed or deleted, and how you verified.
+
+Task from Claude Code:
 `;
 
 // Codex only generates; the runner collects each image from Codex's image store
@@ -91,8 +119,9 @@ Request:
 `;
 
 function initialPrompt(tool, args) {
-  if (tool === 'codex_plan') {
-    return (args.session_id ? '' : PLAN_PREAMBLE) + args.request + (args.context ? `\n\nContext:\n${args.context}` : '');
+  if (tool === 'codex_plan' || tool === 'codex_code') {
+    const preamble = tool === 'codex_code' ? CODE_PREAMBLE(args.cwd) : PLAN_PREAMBLE;
+    return (args.session_id ? '' : preamble) + args.request + (args.context ? `\n\nContext:\n${args.context}` : '');
   }
   return args.session_id ? `${args.prompt}\n\nRules:\n${IMAGE_RULES}` : IMAGE_PREAMBLE(args.count) + args.prompt;
 }
@@ -100,6 +129,9 @@ function initialPrompt(tool, args) {
 function resumePrompt(job) {
   if (job.tool === 'codex_plan') {
     return 'Your previous run on this request was interrupted before you finished. Continue from where you stopped and give your complete final answer.';
+  }
+  if (job.tool === 'codex_code') {
+    return 'Your previous run on this task was interrupted before you finished. Some of your edits may already be in the working tree: inspect the current state first, do not redo finished work, then finish the task and give your final summary (files changed, how you verified).';
   }
   const done = jobImages(job).length;
   const remaining = job.args.count ? Math.max(job.args.count - done, 0) : null;
@@ -112,6 +144,7 @@ ${IMAGE_RULES}
 
 // ---------------------------------------------------------------- jobs
 
+const WRITE_OFF = 'codex_code is switched off. To let Codex write files, the user must set CODEX_BRIDGE_WRITE_ROOT to the one folder it may edit, then restart the MCP server.';
 const newJobId = () => `job-${new Date().toISOString().replace(/[-:T]/g, '').slice(2, 14)}-${crypto.randomBytes(2).toString('hex')}`;
 const loadJob = id => readJson(path.join(jobDir(id), 'job.json'));
 const saveJob = job => writeJson(path.join(jobDir(job.id), 'job.json'), job);
@@ -120,12 +153,12 @@ const saveJob = job => writeJson(path.join(jobDir(job.id), 'job.json'), job);
 // closing Claude doesn't kill it. On Windows that means WMI Win32_Process.Create.
 function launchRunner(jobId, n, cwd) {
   if (!isWin) {
-    const c = spawn(process.execPath, [RUNNER, jobId, String(n)], { cwd, detached: true, stdio: 'ignore' });
+    const c = spawn(process.execPath, [RUNNER, jobId, String(n), BRIDGE_HOME], { cwd, detached: true, stdio: 'ignore' });
     c.unref();
     return Promise.resolve(c.pid);
   }
   const q = s => `'${String(s).replace(/'/g, "''")}'`;
-  const cmdLine = `"${process.execPath}" "${RUNNER}" ${jobId} ${n}`;
+  const cmdLine = `"${process.execPath}" "${RUNNER}" ${jobId} ${n} "${BRIDGE_HOME}"`;
   const ps = `$ErrorActionPreference = 'Stop'
 $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
 $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ${q(cmdLine)}; CurrentDirectory = ${q(cwd)}; ProcessStartupInformation = $si }
@@ -149,15 +182,21 @@ async function launchAttempt(job, prompt, sessionId) {
   const n = job.attempts + 1;
   const dir = attemptDir(job.id, n);
   fs.mkdirSync(dir); // throws EEXIST if another session launched this attempt first
-  const cwd = job.tool === 'codex_plan' ? job.cwd : job.outDir;
+  const cwd = job.cwd ?? job.outDir;
+  const writes = job.tool === 'codex_code';
+  if (writes) { // re-checked on every attempt: a resume must not outlive the user's opt-in
+    if (!WRITE_ROOT) throw new Error(WRITE_OFF);
+    insideWriteRoot(WRITE_ROOT, cwd);
+  }
   fs.writeFileSync(path.join(dir, 'prompt.txt'), prompt);
   writeJson(path.join(dir, 'spec.json'), {
     bin: CODEX_BIN,
     cwd,
     args: buildCodexArgs({
-      sandbox: 'read-only',
+      sandbox: writes ? 'workspace-write' : 'read-only',
       cwd, sessionId, model: job.model, effort: job.effort,
       images: n === 1 ? job.refs : [],
+      allowTmp: WRITE_ALLOW_TMP,
     }),
     env: process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {},
     idleTimeoutMs: IDLE_TIMEOUT_MS,
@@ -180,9 +219,14 @@ async function startJob(tool, args) {
     created: Date.now(),
     attempts: 0,
   };
-  if (tool === 'codex_plan') {
+  if (tool === 'codex_plan' || tool === 'codex_code') {
     job.cwd = path.resolve(args.cwd);
     if (!fs.existsSync(job.cwd)) throw new Error(`cwd does not exist: ${job.cwd}`);
+    if (tool === 'codex_code') {
+      if (!WRITE_ROOT) throw new Error(WRITE_OFF);
+      job.cwd = insideWriteRoot(WRITE_ROOT, job.cwd);
+      args.cwd = job.cwd;
+    }
   } else {
     job.outDir = path.resolve(args.output_dir);
     fs.mkdirSync(job.outDir, { recursive: true });
@@ -227,7 +271,7 @@ function imageCount(job) {
 function jobLine(job) {
   const { status, result } = jobStatus(job);
   const age = secs((result?.finished ?? Date.now()) - job.created);
-  const where = job.tool === 'codex_plan' ? job.cwd : job.outDir;
+  const where = job.cwd ?? job.outDir;
   const label = (job.args.request || job.args.prompt || '').replace(/\s+/g, ' ').slice(0, 70);
   const extra = [job.tool === 'codex_image' ? imageCount(job) : null, job.attempts > 1 ? `attempt ${job.attempts}` : null].filter(Boolean).join(', ');
   return `${job.id} [${job.tool}] ${status}, ${age}${extra ? `, ${extra}` : ''} - ${label} (${where})`;
@@ -247,6 +291,11 @@ function renderResult(job, result) {
     if (result.stderrTail) lines.push(result.stderrTail);
   }
   if (result.message) lines.push(result.message);
+  if (job.tool === 'codex_code') {
+    lines.push('', result.status === 'done'
+      ? `Codex edited files in ${job.cwd} and committed nothing. Review the diff (git diff / git status) before accepting it.`
+      : `Codex may have made partial edits in ${job.cwd}. Check git status / git diff before continuing.`);
+  }
   lines.push('', '---',
     `job_id: ${job.id}${job.attempts > 1 ? ` (attempt ${job.attempts})` : ''}`,
     `session_id: ${result.threadId ?? 'unknown'} (pass as session_id to continue this Codex thread)`,
@@ -383,8 +432,34 @@ const TOOLS = [
   },
 ];
 
+// Only listed when the user opted in with CODEX_BRIDGE_WRITE_ROOT.
+if (WRITE_ROOT) {
+  TOOLS.splice(1, 0, {
+    name: 'codex_code',
+    description:
+      'Ask Codex (OpenAI) to IMPLEMENT a change: it edits files directly, inside ' + WRITE_ROOT + ' (the one folder the user allowed; temp files may also be writable). ' +
+      'It has no network access and does not commit. `cwd` must be that folder or one inside it. Claude stays the reviewer: afterwards read the diff (git diff) ' +
+      'and test before accepting, and fix or send follow-ups with session_id. Use it for well-specified, self-contained work; use codex_plan when you only need a plan. ' +
+      'Calls can take many minutes; use background=true to keep working meanwhile, and avoid editing the same files yourself while it runs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        request: { type: 'string', description: 'What to implement. Include the goal, constraints, files involved and acceptance criteria / how to verify.' },
+        cwd: { type: 'string', description: `Absolute path of the project folder Codex edits. Must be ${WRITE_ROOT} or inside it.` },
+        context: { type: 'string', description: 'Optional extra context: a plan to follow, error output, decisions already made.' },
+        session_id: { type: 'string', description: 'Optional. Continue an earlier Codex thread (e.g. to fix review comments).' },
+        effort: { type: 'string', enum: EFFORTS, description: 'Optional reasoning effort. Default: the user\'s Codex config.' },
+        model: { type: 'string', description: 'Optional Codex model override. Default: the user\'s Codex config.' },
+        background: BACKGROUND_PROP,
+      },
+      required: ['request', 'cwd'],
+    },
+  });
+}
+
 async function callJobTool(name, args, onActivity) {
-  if (name === 'codex_plan' && (!args.request || !args.cwd)) throw new Error('request and cwd are required');
+  if (name === 'codex_code' && !WRITE_ROOT) throw new Error(WRITE_OFF);
+  if ((name === 'codex_plan' || name === 'codex_code') && (!args.request || !args.cwd)) throw new Error('request and cwd are required');
   if (name === 'codex_image' && (!args.prompt || !args.output_dir)) throw new Error('prompt and output_dir are required');
   if (args.effort && !EFFORTS.includes(args.effort)) throw new Error(`effort must be one of ${EFFORTS.join(', ')}`);
   const job = await startJob(name, args);
@@ -451,6 +526,9 @@ function instructions() {
   let text = 'Use codex_plan to get an implementation plan or second opinion from Codex (read-only), and codex_image to have Codex generate images. ' +
     'Claude implements; Codex plans and builds images. Codex calls take minutes: when there is other work to do meanwhile, pass background=true and collect the result with codex_result. ' +
     'Jobs are durable: they survive Claude closing, and codex_resume continues interrupted ones.';
+  if (WRITE_ROOT) {
+    text += ` The user also enabled codex_code: Codex may implement changes by editing files, but only inside ${WRITE_ROOT}. Review its diff before accepting it.`;
+  }
   try {
     const interrupted = listJobs().filter(j => jobStatus(j).status === 'interrupted').slice(0, 10);
     if (interrupted.length) {
@@ -488,7 +566,7 @@ async function handle(msg) {
       };
       try {
         let out;
-        if (name === 'codex_plan' || name === 'codex_image') out = await callJobTool(name, args, onActivity);
+        if (name === 'codex_plan' || name === 'codex_image' || name === 'codex_code') out = await callJobTool(name, args, onActivity);
         else if (name === 'codex_result') out = await jobResult(args);
         else if (name === 'codex_resume') out = await resumeJob(args);
         else if (name === 'codex_cancel') out = cancelJob(args);

@@ -1,0 +1,12 @@
+{
+  "name": "codex-bridge",
+  "owner": { "name": "Xallindrome", "url": "https://xallindrome.co" },
+  "metadata": { "description": "Claude Code add-ons for codex-bridge." },
+  "plugins": [
+    {
+      "name": "codex-jobs",
+      "source": "./plugins/codex-jobs",
+      "description": "A pane beside the chat that lists your codex-bridge jobs live: running, done, interrupted."
+    }
+  ]
+}

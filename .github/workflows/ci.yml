@@ -43,9 +43,15 @@ jobs:
           mkdir "$RUNNER_TEMP/clean" && cd "$RUNNER_TEMP/clean"
           npm init -y > /dev/null
           npm install "$RUNNER_TEMP"/xallindrome-labs-codex-bridge-*.tgz
-          for f in server.mjs runner.mjs lib.mjs LICENSE README.md; do
+          for f in server.mjs runner.mjs lib.mjs LICENSE README.md .claude-plugin/marketplace.json \
+                   plugins/codex-jobs/.claude-plugin/plugin.json plugins/codex-jobs/hooks/hooks.json \
+                   plugins/codex-jobs/hooks/register.tsx plugins/codex-jobs/types/index.d.ts; do
             test -f "node_modules/@xallindrome-labs/codex-bridge/$f" || { echo "missing from package: $f"; exit 1; }
           done
+          # --pane-path must point at the bundled pane add-on, and its tests must not ship.
+          pane="$(node node_modules/@xallindrome-labs/codex-bridge/server.mjs --pane-path)"
+          test -f "$pane/.claude-plugin/plugin.json" || { echo "--pane-path is wrong: $pane"; exit 1; }
+          test ! -f "$pane/hooks/register.test.tsx" || { echo "test file shipped in package"; exit 1; }
           cd "$GITHUB_WORKSPACE"
           export CODEX_BRIDGE_TEST_SERVER="$RUNNER_TEMP/clean/node_modules/@xallindrome-labs/codex-bridge/server.mjs"
           node test/protocol.mjs

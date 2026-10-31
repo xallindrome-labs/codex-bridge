@@ -2,28 +2,78 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.xallindrome-labs/codex-bridge",
   "title": "codex-bridge",
-  "description": "Lets Claude Code consult the Codex CLI for plans and images, as durable background jobs.",
+  "description": "Claude Code consults Codex for plans, images and optional code, as durable background jobs.",
   "websiteUrl": "https://xallindrome.co",
   "repository": {
     "url": "https://github.com/xallindrome-labs/codex-bridge",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.2.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@xallindrome-labs/codex-bridge",
-      "version": "0.1.0",
-      "transport": { "type": "stdio" },
+      "version": "0.2.0",
+      "transport": {
+        "type": "stdio"
+      },
       "environmentVariables": [
-        { "name": "CODEX_BIN", "description": "Path to the Codex CLI binary. Auto-detected when unset.", "isRequired": false },
-        { "name": "CODEX_BRIDGE_HOME", "description": "Where job files are stored. Default: ~/.codex-bridge", "isRequired": false },
-        { "name": "CODEX_BRIDGE_IDLE_TIMEOUT_MS", "description": "Stop a run after this many ms with no Codex output. Default: 600000", "isRequired": false },
-        { "name": "CODEX_BRIDGE_PLAN_MODEL", "description": "Model for codex_plan. Default: your Codex config.", "isRequired": false },
-        { "name": "CODEX_BRIDGE_PLAN_EFFORT", "description": "Reasoning effort for codex_plan. Default: your Codex config.", "isRequired": false },
-        { "name": "CODEX_BRIDGE_IMAGE_MODEL", "description": "Model for codex_image. Default: gpt-6-luna", "isRequired": false },
-        { "name": "CODEX_BRIDGE_IMAGE_EFFORT", "description": "Reasoning effort for codex_image. Default: high", "isRequired": false }
+        {
+          "name": "CODEX_BIN",
+          "description": "Path to the Codex CLI binary. Auto-detected when unset.",
+          "isRequired": false
+        },
+        {
+          "name": "CODEX_BRIDGE_HOME",
+          "description": "Where job files are stored. Default: ~/.codex-bridge",
+          "isRequired": false
+        },
+        {
+          "name": "CODEX_BRIDGE_IDLE_TIMEOUT_MS",
+          "description": "Stop a run after this many ms with no Codex output. Default: 600000",
+          "isRequired": false
+        },
+        {
+          "name": "CODEX_BRIDGE_PLAN_MODEL",
+          "description": "Model for codex_plan. Default: your Codex config.",
+          "isRequired": false
+        },
+        {
+          "name": "CODEX_BRIDGE_PLAN_EFFORT",
+          "description": "Reasoning effort for codex_plan. Default: your Codex config.",
+          "isRequired": false
+        },
+        {
+          "name": "CODEX_BRIDGE_IMAGE_MODEL",
+          "description": "Model for codex_image. Default: gpt-6-luna",
+          "isRequired": false
+        },
+        {
+          "name": "CODEX_BRIDGE_IMAGE_EFFORT",
+          "description": "Reasoning effort for codex_image. Default: high",
+          "isRequired": false
+        },
+        {
+          "name": "CODEX_BRIDGE_WRITE_ROOT",
+          "description": "Opt-in. One folder Codex may edit through the codex_code tool. Unset = codex_code is off.",
+          "isRequired": false
+        },
+        {
+          "name": "CODEX_BRIDGE_WRITE_ALLOW_TMP",
+          "description": "Set to 1 to stop asking Codex to block temp-folder writes in codex_code. Default: unset.",
+          "isRequired": false
+        },
+        {
+          "name": "CODEX_BRIDGE_CODE_MODEL",
+          "description": "Model for codex_code. Default: your Codex config.",
+          "isRequired": false
+        },
+        {
+          "name": "CODEX_BRIDGE_CODE_EFFORT",
+          "description": "Reasoning effort for codex_code. Default: your Codex config.",
+          "isRequired": false
+        }
       ]
     }
   ]

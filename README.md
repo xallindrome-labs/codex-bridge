@@ -2,7 +2,7 @@
 
 **Codex jobs for Claude Code that survive crashes, closed windows and reboots, with Codex image generation built in.** A dependency-free MCP server built Windows-first: every call is a job saved on disk, so you can close Claude, lose power, or kill a process, and pick the work up again with `codex_resume`.
 
-Roles: **Claude Code implements. Codex plans and builds images.**
+Roles: **Claude Code implements. Codex plans and builds images.** Optionally (opt-in, one folder), Codex can also write code while Claude reviews: see [Let Codex write code](#let-codex-write-code-opt-in).
 
 ![Recorded session: Claude Code starts codex-bridge and asks Codex for a plan](docs/demo.svg)
 
@@ -26,17 +26,51 @@ Other MCP clients: run `npx -y @xallindrome-labs/codex-bridge` as a stdio server
 |---|---|---|---|
 | `codex_plan` | Codex writes implementation plans, design reviews and second opinions. It inspects the project in `cwd`. | `read-only` (always) | Your Codex config defaults |
 | `codex_image` | Codex generates or edits images. The bridge copies each one into `output_dir` as soon as it's made. | `read-only` (always) | **gpt-6-luna / high** |
+| `codex_code` | **Off by default.** Codex implements a change by editing files in one folder you choose. See [below](#let-codex-write-code-opt-in). | `workspace-write`, that folder only, no network | Your Codex config defaults |
 | `codex_result` | Gets a job's result or progress (`wait_seconds` up to 240), or lists recent jobs. | | |
 | `codex_resume` | Continues an interrupted, timed-out or failed job from where it stopped. | | |
 | `codex_cancel` | Stops a running job. | | |
 
-`codex_plan` and `codex_image` accept:
+`codex_plan`, `codex_image` and `codex_code` accept:
 - `effort`: `low`, `medium`, `high`, `xhigh`, `max` or `ultra` (Luna supports up to `max`).
 - `model`: overrides the default model for that call.
 - `background: true`: returns a `job_id` immediately so Claude can keep working.
 - `session_id`: continues an earlier Codex thread, for example "make the icon darker".
 
 `codex_image` also takes `count`, the number of images wanted. Set it for batches: it enables `k/count` progress and resumes that ask for exactly the missing images.
+
+## Let Codex write code (opt-in)
+
+By default Codex can only read. If you want it to implement things while Claude reviews, name the one folder it may edit:
+
+```bash
+claude mcp add codex-bridge -e CODEX_BRIDGE_WRITE_ROOT=/path/to/your/project -- npx -y @xallindrome-labs/codex-bridge
+```
+
+Restart Claude Code and a fourth tool, `codex_code`, appears. Ask for it in plain words: *"Have Codex implement the plan in the background, then review its diff."*
+
+- **One folder.** `cwd` must be `CODEX_BRIDGE_WRITE_ROOT` or inside it. Anything else is refused, checked on real paths so `..` and symlinks don't escape. A drive root or your home folder is refused as too broad.
+- **No network, no commits.** Codex runs with network access off and is told to leave changes uncommitted so you can see them in `git diff`. The no-commit rule is a prompt, not a sandbox rule.
+- **Claude reviews.** Every `codex_code` result ends with a reminder to read the diff before accepting it. A failed or cancelled run says Codex may have left partial edits.
+- **Same job machinery.** It survives restarts, `background: true` and `codex_resume` work the same way, and a resume re-checks the folder rule.
+- **Temp files.** In our test on Windows 11, writes outside the folder and network access were blocked, but the system temp folder stayed writable. Treat temp as writable. `CODEX_BRIDGE_WRITE_ALLOW_TMP=1` stops asking Codex to block it.
+- **Don't edit the same files yourself** while a `codex_code` job runs.
+
+Unset the variable and restart, and the tool is gone; `codex_plan` and `codex_image` are always read-only.
+
+## Codex jobs pane
+
+An optional add-on that opens a pane beside the Claude Code chat listing your Codex jobs live: running, done, interrupted, with age, request and `images k/n` for batches. It only reads the job files on disk, so it shows jobs from any session, including ones that kept running after you closed Claude. It also puts `codex: N running` in the status line and shows a toast when a job you watched finishes.
+
+At the prompt of a terminal Claude Code session:
+
+```
+/plugin install codex-jobs --marketplace xallindrome-labs/codex-bridge
+```
+
+In the desktop app, where `/plugin` does not run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `xallindrome-labs/codex-bridge`, then **Add plugin**. Without a marketplace, for one session: `claude --plugin-dir "$(npx -y @xallindrome-labs/codex-bridge --pane-path)"`.
+
+Then type `/codex-jobs`. It also opens by itself the first time a job is running in a session. Details and how it works are in [plugins/codex-jobs](plugins/codex-jobs/README.md). It needs a Claude Code build that supports mods; it is tested against the engine's own test kit, not every surface's paint.
 
 ## How it compares
 
@@ -81,7 +115,7 @@ Each attempt keeps its own `prompt.txt`, `events.jsonl` (the Codex event stream)
 
 Each attempt runs `codex exec --json` (or `codex exec resume <thread>`) with the prompt on stdin. No shell is involved.
 
-Every call runs read-only. New sessions pass `-s read-only` plus `-c sandbox_mode="read-only"`; resumed sessions pass `-c sandbox_mode="read-only"` (`codex exec resume` takes no `-s`). Your Codex config may default to `danger-full-access`, but that default never applies to bridge calls. The `plan` smoke test checks that a write attempted from a resumed session fails.
+Every call runs read-only, except `codex_code` when you have opted in (it runs `workspace-write` in your one folder, with network off). New sessions pass `-s read-only` plus `-c sandbox_mode="read-only"`; resumed sessions pass `-c sandbox_mode="read-only"` (`codex exec resume` takes no `-s`). Your Codex config may default to `danger-full-access`, but that default never applies to bridge calls. The `plan` smoke test checks that a write attempted from a resumed session fails.
 
 | File | Role |
 |---|---|
@@ -110,6 +144,9 @@ Remove it with `claude mcp remove codex-bridge` (add `-s user` if you installed 
 | `CODEX_BRIDGE_IDLE_TIMEOUT_MS` | `600000` (stops a run after 10 minutes with no Codex output) |
 | `CODEX_BRIDGE_PLAN_MODEL` / `CODEX_BRIDGE_PLAN_EFFORT` | Your Codex config defaults |
 | `CODEX_BRIDGE_IMAGE_MODEL` / `CODEX_BRIDGE_IMAGE_EFFORT` | `gpt-6-luna` / `high` |
+| `CODEX_BRIDGE_WRITE_ROOT` | Unset: `codex_code` is off. Set to one folder to let `codex_code` edit files there. |
+| `CODEX_BRIDGE_WRITE_ALLOW_TMP` | Unset. `1` stops asking Codex to block temp-folder writes (not enforced on Windows anyway). |
+| `CODEX_BRIDGE_CODE_MODEL` / `CODEX_BRIDGE_CODE_EFFORT` | Your Codex config defaults |
 
 ## Test
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs one attempt of a codex-bridge job, detached from Claude Code, so the job
-// survives Claude closing or crashing. Usage: node runner.mjs <jobId> <attempt>
+// survives Claude closing or crashing. Usage: node runner.mjs <jobId> <attempt> [bridgeHome]
 //
 // Reads   jobs/<id>/job.json, attempt-<n>/spec.json, attempt-<n>/prompt.txt
 // Writes  attempt-<n>/events.jsonl, stderr.txt, state.json, heartbeat, result.json
@@ -8,11 +8,15 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import {
-  EventTail, attemptDir, collectImages, jobDir, jobImages, killTree, readJson, writeJson,
-} from './lib.mjs';
 
-const [jobId, n] = process.argv.slice(2);
+const [jobId, n, bridgeHome] = process.argv.slice(2);
+// On Windows the runner is started through WMI and does not inherit the server's environment,
+// so the server passes its job storage folder as an argument. lib.mjs reads it at import time.
+if (bridgeHome) process.env.CODEX_BRIDGE_HOME = bridgeHome;
+const {
+  EventTail, attemptDir, collectImages, jobDir, jobImages, killTree, readJson, writeJson,
+} = await import('./lib.mjs');
+
 const dir = attemptDir(jobId, n);
 const job = readJson(path.join(jobDir(jobId), 'job.json'));
 const spec = readJson(path.join(dir, 'spec.json'));

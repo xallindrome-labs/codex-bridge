@@ -34,10 +34,16 @@ export function resolveCodexBin() {
 }
 
 // `codex exec` (or `codex exec resume`) arguments; the prompt is always read from stdin.
-export function buildCodexArgs({ sandbox, cwd, sessionId, model, effort, images = [] }) {
+// workspace-write is the opt-in codex_code sandbox: Codex may write in `cwd` only, with no network.
+// Unless allowTmp, the system temp dirs are not writable either, so "one folder" really means one folder.
+export function buildCodexArgs({ sandbox, cwd, sessionId, model, effort, images = [], allowTmp = false }) {
   const args = ['exec'];
   if (sessionId) args.push('resume');
   args.push('--json', '--skip-git-repo-check', '-c', `sandbox_mode="${sandbox}"`);
+  if (sandbox === 'workspace-write') {
+    args.push('-c', 'sandbox_workspace_write.network_access=false');
+    if (!allowTmp) args.push('-c', 'sandbox_workspace_write.exclude_tmpdir_env_var=true', '-c', 'sandbox_workspace_write.exclude_slash_tmp=true');
+  }
   if (!sessionId) args.push('-s', sandbox, '-C', cwd);
   if (model) args.push('-m', model);
   if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
@@ -45,6 +51,34 @@ export function buildCodexArgs({ sandbox, cwd, sessionId, model, effort, images 
   if (sessionId) args.push(sessionId);
   args.push('-');
   return args;
+}
+
+// ---------------------------------------------------------------- write root
+
+// The one folder codex_code may write in (CODEX_BRIDGE_WRITE_ROOT), as a real path. Throws with a
+// reason if it is unusable: missing, not a folder, a drive root or the home folder (too broad).
+export function resolveWriteRoot(raw = process.env.CODEX_BRIDGE_WRITE_ROOT) {
+  if (!raw) return null;
+  let root;
+  try { root = fs.realpathSync(path.resolve(raw)); } catch { throw new Error(`CODEX_BRIDGE_WRITE_ROOT does not exist: ${raw}`); }
+  if (!fs.statSync(root).isDirectory()) throw new Error(`CODEX_BRIDGE_WRITE_ROOT is not a folder: ${raw}`);
+  let home = os.homedir();
+  try { home = fs.realpathSync(home); } catch {}
+  if (path.parse(root).root === root || root === home) {
+    throw new Error(`CODEX_BRIDGE_WRITE_ROOT is too broad (${root}); point it at one project folder`);
+  }
+  return root;
+}
+
+// Real path of `dir` if it is `root` or inside it, otherwise throws.
+export function insideWriteRoot(root, dir) {
+  let real;
+  try { real = fs.realpathSync(path.resolve(dir)); } catch { throw new Error(`cwd does not exist: ${dir}`); }
+  const rel = path.relative(root, real);
+  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    throw new Error(`codex_code may only write inside ${root}; ${real} is outside it`);
+  }
+  return real;
 }
 
 // ---------------------------------------------------------------- files
