@@ -31,7 +31,7 @@ function disk(files: Record<string, string>, mtimes: Record<string, number> = {}
 const norm = (p: string) => p.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
 
 function mockDisk($: unknown, on: any, d: ReturnType<typeof disk>, hasRoot = true) {
-  on('env.get', (_: unknown, e: { name: string }) => ({ value: e.name === 'CODEX_BRIDGE_HOME' ? '/bridge' : undefined }))
+  on('env.get', (_: unknown, e: { name: string }) => ({ value: ({ CODEX_BRIDGE_HOME: '/bridge', CODEX_HOME: '/codex' } as Record<string, string>)[e.name] }))
   on('clock.now', () => ({ value: NOW }))
   on('command.register', () => ({ value: { command: 'codex-jobs' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -43,7 +43,9 @@ function mockDisk($: unknown, on: any, d: ReturnType<typeof disk>, hasRoot = tru
     const e = { path: norm(ev.path) }
     if (!hasRoot) throw new Error('ENOENT')
     const names = [...d.dirs].filter(p => p.startsWith(`${e.path}/`) && !p.slice(e.path.length + 1).includes('/'))
-    return { value: names.map(p => ({ name: p.slice(e.path.length + 1), kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) }
+    const files = Object.keys(d.files).filter(p => p.startsWith(`${e.path}/`) && !p.slice(e.path.length + 1).includes('/'))
+    const entry = (p: string, kind: string) => ({ name: p.slice(e.path.length + 1), kind, size: 0, mtimeMs: 0, isLink: false })
+    return { value: [...names.map(p => entry(p, 'dir')), ...files.map(p => entry(p, 'file'))] }
   })
   on('fs.stat', (_: unknown, ev: { path: string }) => {
     const e = { path: norm(ev.path) }
@@ -75,6 +77,11 @@ test('the pane lists a running, a finished and a dead job, on every surface', as
       [`${ROOT}/job-3/job.json`]: job('job-3', { tool: 'codex_image', args: { prompt: 'a logo', count: 3 } }),
       [`${ROOT}/job-3/attempt-1/heartbeat`]: '1',
       [`${ROOT}/job-3/copied.json`]: JSON.stringify({ a: 'x.png' }),
+      // Codex's own log: the last token_count line holds the usage windows (resets_at in seconds).
+      '/codex/sessions/2026/10/31/rollout-2026-10-31T19-12-04-aaa.jsonl': [
+        JSON.stringify({ timestamp: '1970-01-01T00:02:30.000Z', payload: { type: 'token_count', rate_limits: null } }),
+        JSON.stringify({ timestamp: '1970-01-01T00:02:40.000Z', payload: { type: 'token_count', rate_limits: { limit_id: 'codex', primary: { used_percent: 7, window_minutes: 300, resets_at: 21520 }, secondary: { used_percent: 10, window_minutes: 10080, resets_at: 197200 } } } }),
+      ].join('\n'),
     },
     { [`${ROOT}/job-1/attempt-1/heartbeat`]: NOW - 2_000, [`${ROOT}/job-3/attempt-1/heartbeat`]: NOW - 600_000 },
   )
@@ -91,6 +98,12 @@ test('the pane lists a running, a finished and a dead job, on every surface', as
     expect(await ui.find({ type: 'Text', text: /^interrupted$/ })).toBeTruthy()
     expect(await ui.find({ type: 'Text', text: /images 1\/3/ })).toBeTruthy()
     expect(await ui.find({ type: 'Text', text: /codex_resume with job_id job-3/ })).toBeTruthy()
+    // Both usage windows with their reset times, and the images counted in each.
+    expect(await ui.find({ type: 'Text', text: /resets in 3h 12m/ })).toBeTruthy()
+    expect(await ui.find({ type: 'Text', text: /resets in 2d 4h/ })).toBeTruthy()
+    expect(await ui.find({ type: 'Text', text: /7%/ })).toBeTruthy()
+    expect(await ui.find({ type: 'Text', text: /10%/ })).toBeTruthy()
+    expect(await ui.find({ type: 'Text', text: /images this window: 1/ })).toBeTruthy()
     await ui.unmount()
   }
 })

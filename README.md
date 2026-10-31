@@ -2,7 +2,7 @@
 
 **Codex jobs for Claude Code that survive crashes, closed windows and reboots, with Codex image generation built in.** A dependency-free MCP server built Windows-first: every call is a job saved on disk, so you can close Claude, lose power, or kill a process, and pick the work up again with `codex_resume`.
 
-Roles: **Claude Code implements. Codex plans and builds images.** Optionally (opt-in, one folder), Codex can also write code while Claude reviews: see [Let Codex write code](#let-codex-write-code-opt-in).
+Roles: **Claude Code implements. Codex plans and builds images.** Optionally (opt-in, one folder), Codex can also write code while Claude reviews: see [Let Codex write code](#let-codex-write-code-opt-in). And an optional pane beside the chat lists your jobs live and shows your Codex usage and when it resets: see [Codex jobs pane](#codex-jobs-pane).
 
 ![Recorded session: Claude Code starts codex-bridge and asks Codex for a plan](docs/demo.svg)
 
@@ -60,7 +60,7 @@ Unset the variable and restart, and the tool is gone; `codex_plan` and `codex_im
 
 ## Codex jobs pane
 
-An optional add-on that opens a pane beside the Claude Code chat listing your Codex jobs live: running, done, interrupted, with age, request and `images k/n` for batches. It only reads the job files on disk, so it shows jobs from any session, including ones that kept running after you closed Claude. It also puts `codex: N running` in the status line and shows a toast when a job you watched finishes.
+An optional add-on that opens a pane beside the Claude Code chat listing your Codex jobs live: running, done, interrupted, with age, request and `images k/n` for batches. It also shows your Codex usage: the 5-hour and weekly windows, percent used, when each resets, and how many images were generated in each (Codex has one shared meter, so images use the same limits). It only reads the job files on disk, so it shows jobs from any session, including ones that kept running after you closed Claude. It also puts `codex: N running` in the status line and shows a toast when a job you watched finishes.
 
 At the prompt of a terminal Claude Code session:
 

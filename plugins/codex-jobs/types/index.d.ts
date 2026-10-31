@@ -18,8 +18,29 @@ export type JobRow = {
   count?: number
 }
 
+// One of Codex's usage windows, as its last session log reported it.
+export type UsageWindow = {
+  usedPercent: number
+  windowMinutes: number
+  // Milliseconds since the epoch.
+  resetsAt: number
+}
+
+export type Usage = {
+  // The 5-hour window and the weekly one. Codex reports one shared meter: images draw on it too.
+  primary?: UsageWindow
+  secondary?: UsageWindow
+  // When Codex wrote the reading.
+  asOf: number
+}
+
+// Images the bridge saved, by when the job started; the pane counts them per usage window.
+export type ImageTally = { at: number; n: number }
+
 export type JobsSnapshot = {
   rows: JobRow[]
+  images: ImageTally[]
+  usage?: Usage
   // When the snapshot was read; the pane's elapsed times count up from it.
   at: number
   // Set when the jobs folder could not be read.

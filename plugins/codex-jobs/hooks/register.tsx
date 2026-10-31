@@ -1,15 +1,23 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { JobRow, JobStatus, JobsSnapshot } from '../types'
+import type { ImageTally, JobRow, JobStatus, JobsSnapshot, Usage, UsageWindow } from '../types'
 
-// A pane beside the chat that lists codex-bridge jobs. It only reads the job
-// files codex-bridge keeps on disk (jobs/<id>/job.json, attempt-<n>/result.json
-// and heartbeat), so it works for jobs started by any Claude session.
+// A pane beside the chat that lists codex-bridge jobs. It only reads files:
+// the job files codex-bridge keeps (jobs/<id>/job.json, attempt-<n>/result.json
+// and heartbeat), so it works for jobs started by any Claude session, and the
+// newest Codex session logs, where Codex records how much of its 5-hour and
+// weekly usage windows is used and when each resets.
 
 const PANE = 'codex-jobs'
 const POLL_MS = 3000
 const SHOWN = 12
+// Jobs read per poll (the rest of the list is older). Finished ones are cached, so this is cheap.
+const READ = 60
+// Codex usage is re-read every this many polls (30s); its logs change slowly.
+const USAGE_EVERY = 10
+const USAGE_FILES = 4
+const DAY_MS = 24 * 3600 * 1000
 // The runner beats every 2s; a job whose heartbeat is older than this is dead.
 const BEAT_STALE_MS = 30_000
 const LAUNCH_GRACE_MS = 60_000
@@ -18,8 +26,8 @@ const LAUNCH_GRACE_MS = 60_000
 // version stored, which outlives a reload.
 const snapshot = atom(
   { plugin: 'codex-jobs', key: 'snapshot' } as const,
-  { rows: [], at: 0 } as JobsSnapshot,
-  { shape: 'snapshot-1' },
+  { rows: [], images: [], at: 0 } as JobsSnapshot,
+  { shape: 'snapshot-2' },
 )
 
 type Job = {
@@ -58,6 +66,20 @@ export const ago = (ms: number): string => {
   return m < 120 ? `${m}m` : `${Math.round(m / 60)}h`
 }
 
+// "3h 12m", "2d 4h": how long until a usage window resets.
+export const until = (ms: number): string => {
+  const m = Math.max(0, Math.round(ms / 60_000))
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ${m % 60}m`
+  return `${Math.floor(h / 24)}d ${h % 24}h`
+}
+
+const bar = (percent: number, width = 10): string => {
+  const filled = Math.min(width, Math.max(0, Math.round((percent / 100) * width)))
+  return '█'.repeat(filled) + '░'.repeat(width - filled)
+}
+
 // Jobs finished, failed or dead are history; only these can still change.
 const isFinal = (s: JobStatus) => s !== 'running' && s !== 'interrupted'
 
@@ -65,6 +87,8 @@ const isFinal = (s: JobStatus) => s !== 'running' && s !== 'interrupted'
 const cache = new Map<string, { mtime: number; row: JobRow }>()
 let last = ''
 let lastRunning = -1
+let ticks = 0
+let usage: Usage | undefined
 let hasAutoOpened = false
 let timer: { cancel: () => void } | undefined
 
@@ -133,6 +157,69 @@ async function readRow($: EngineInterface, dir: string, id: string): Promise<Job
   return row
 }
 
+const names = async ($: EngineInterface, dir: string, kind: 'dir' | 'file') =>
+  ((await $.fs.list(dir).catch(() => [])) ?? [])
+    .filter(entry => entry.kind === kind)
+    .map(entry => entry.name)
+    .sort()
+    .reverse()
+
+const toWindow = (w: unknown): UsageWindow | undefined => {
+  const x = w as { used_percent?: number; window_minutes?: number; resets_at?: number } | null | undefined
+  if (typeof x?.used_percent !== 'number' || typeof x.window_minutes !== 'number' || typeof x.resets_at !== 'number') {
+    return undefined
+  }
+  return { usedPercent: x.used_percent, windowMinutes: x.window_minutes, resetsAt: x.resets_at * 1000 }
+}
+
+// Codex writes its usage windows into every session log (token_count events:
+// payload.rate_limits.primary / .secondary). The newest log with a reading is
+// the freshest one; the same meter covers text and image generation.
+async function readUsage($: EngineInterface): Promise<Usage | undefined> {
+  const codexHome = await $.env.get('CODEX_HOME')
+  const user = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+  const base = codexHome ?? (user ? `${user}/.codex` : undefined)
+  if (!base) return undefined
+  const root = `${slash(base)}/sessions`
+  const files: string[] = []
+  for (const year of await names($, root, 'dir')) {
+    for (const month of await names($, `${root}/${year}`, 'dir')) {
+      for (const day of await names($, `${root}/${year}/${month}`, 'dir')) {
+        const dayDir = `${root}/${year}/${month}/${day}`
+        for (const name of await names($, dayDir, 'file')) {
+          if (name.startsWith('rollout-') && name.endsWith('.jsonl')) files.push(`${dayDir}/${name}`)
+          if (files.length >= USAGE_FILES) break
+        }
+        if (files.length >= USAGE_FILES) break
+      }
+      if (files.length >= USAGE_FILES) break
+    }
+    if (files.length >= USAGE_FILES) break
+  }
+  for (const file of files) {
+    // A log over 4 MiB cannot be read whole; the next one is tried.
+    const text = await $.fs.read(file).catch(() => undefined)
+    if (!text) continue
+    const lines = text.split('\n')
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]
+      if (!line?.includes('"rate_limits":{')) continue
+      try {
+        const event = JSON.parse(line) as { timestamp?: string; payload?: { rate_limits?: { primary?: unknown; secondary?: unknown } } }
+        const limits = event.payload?.rate_limits
+        const primary = toWindow(limits?.primary)
+        const secondary = toWindow(limits?.secondary)
+        if (primary || secondary) {
+          return { primary, secondary, asOf: event.timestamp ? Date.parse(event.timestamp) || 0 : 0 }
+        }
+      } catch {
+        // A half-written last line; the one before it is fine.
+      }
+    }
+  }
+  return undefined
+}
+
 async function tick($: EngineInterface): Promise<void> {
   const dir = await jobsDir($)
   const now = await $.clock.now()
@@ -141,18 +228,20 @@ async function tick($: EngineInterface): Promise<void> {
   if (!dir) {
     problem = 'Cannot work out where codex-bridge keeps its jobs (no home folder).'
   } else {
-    const entries = await $.fs.list(dir).catch(() => undefined)
     // A missing folder just means codex-bridge has not run yet.
-    const ids = (entries ?? [])
-      .filter(entry => entry.kind === 'dir' && entry.name.startsWith('job-'))
-      .map(entry => entry.name)
-      .sort()
-      .reverse()
-      .slice(0, SHOWN)
+    const ids = (await names($, dir, 'dir')).filter(name => name.startsWith('job-')).slice(0, READ)
     for (const id of cache.keys()) if (!ids.includes(id)) cache.delete(id)
     const loaded = await Promise.all(ids.map(id => readRow($, dir, id).catch(() => undefined)))
     rows = loaded.filter((row): row is JobRow => row !== undefined)
   }
+
+  // Images the bridge saved in the last week, counted per usage window when drawn.
+  const images: ImageTally[] = rows
+    .filter(row => row.tool === 'codex_image' && (row.images ?? 0) > 0 && now - row.created < 7 * DAY_MS)
+    .map(row => ({ at: row.created, n: row.images ?? 0 }))
+  const isUsageTick = ticks++ % USAGE_EVERY === 0
+  if (isUsageTick) usage = await readUsage($).catch(() => usage)
+  rows = rows.slice(0, SHOWN)
 
   const running = rows.filter(row => row.status === 'running').length
   if (running !== lastRunning) {
@@ -164,10 +253,10 @@ async function tick($: EngineInterface): Promise<void> {
     void $.ui.open({ id: PANE, title: 'Codex jobs' })
   }
 
-  const key = JSON.stringify(rows) + (problem ?? '')
-  if (running > 0 || key !== last) {
+  const key = JSON.stringify([rows, images, usage]) + (problem ?? '')
+  if (running > 0 || isUsageTick || key !== last) {
     last = key
-    await update($, snapshot, () => ({ rows, at: now, problem }))
+    await update($, snapshot, () => ({ rows, images, usage, at: now, problem }))
   }
 }
 
@@ -211,9 +300,13 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
     const snap = await read($, snapshot)
-    const room = Math.max(1, Math.floor(((e.viewport?.rows ?? 24) - 6) / 2))
+    const room = Math.max(1, Math.floor(((e.viewport?.rows ?? 30) - 14) / 2))
     const running = snap.rows.filter(row => row.status === 'running').length
     const interrupted = snap.rows.filter(row => row.status === 'interrupted')
+    const windows = [
+      snap.usage?.primary && { label: '5-hour', ...snap.usage.primary },
+      snap.usage?.secondary && { label: 'Weekly', ...snap.usage.secondary },
+    ].filter((w): w is UsageWindow & { label: string } => !!w)
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -222,6 +315,37 @@ export const register: Register = on => {
           <Text dimColor>
             {running} running, {snap.rows.length} shown
           </Text>
+        </Box>
+        <Box flexDirection="column">
+          <Text bold>Codex usage</Text>
+          {windows.length === 0 && <Text dimColor>No usage reading yet. Codex records one after its first run.</Text>}
+          {windows.map(w => {
+            const isReset = w.resetsAt <= snap.at
+            // Images are counted from the start of this window, by when each job began.
+            const since = w.resetsAt - w.windowMinutes * 60_000
+            const imagesNow = snap.images.filter(i => i.at >= since).reduce((sum, i) => sum + i.n, 0)
+
+            return (
+              <Box flexDirection="column">
+                <Box gap={1}>
+                  <Text>{w.label}</Text>
+                  <Text color={w.usedPercent >= 90 ? 'red' : w.usedPercent >= 70 ? 'yellow' : 'green'}>
+                    {bar(isReset ? 0 : w.usedPercent)} {isReset ? 0 : Math.round(w.usedPercent)}%
+                  </Text>
+                  <Text dimColor>{isReset ? 'window has reset' : `resets in ${until(w.resetsAt - snap.at)}`}</Text>
+                </Box>
+                <Text dimColor>
+                  {'  '}images this window: {isReset ? 0 : imagesNow}
+                </Text>
+              </Box>
+            )
+          })}
+          {windows.length > 0 && (
+            <Text dimColor>
+              Images share these limits; Codex has no separate image meter.
+              {snap.usage?.asOf ? ` Read ${ago(snap.at - snap.usage.asOf)} ago.` : ''}
+            </Text>
+          )}
         </Box>
         {snap.problem && <Text color="red">{snap.problem}</Text>}
         {!snap.problem && snap.rows.length === 0 && (
